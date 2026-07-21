@@ -1,0 +1,110 @@
+# postgres-guardrails CI — re-checks migrations and diffs query plans on
+# every pull request, using headless Claude Code as the check engine.
+#
+# See docs/ci-setup.md for the ~5-minute setup. In short:
+#   1. Edit the "Checkout postgres-guardrails plugin" step below to point
+#      at wherever you host this plugin's repo.
+#   2. Add the ANTHROPIC_API_KEY secret (required).
+#   3. Optionally add the DATABASE_URL secret (a staging DB) to also get
+#      EXPLAIN plan-cost diffs on changed queries.
+#
+# Required secret:
+#   ANTHROPIC_API_KEY   lets `claude -p` run headless.
+# Optional secret:
+#   DATABASE_URL        a staging/test Postgres connection string, used
+#                        only for EXPLAIN (FORMAT JSON) - never ANALYZE,
+#                        never a mutating statement. Without it, the plan
+#                        diff step is skipped and only the Migration
+#                        Firewall check runs.
+
+name: postgres-guardrails
+
+on:
+  pull_request:
+    paths:
+      - "**/migrations/**"
+      - "**/migrate/**"
+      - "db/migrate/**"
+      - "prisma/migrations/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: postgres-guardrails-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guardrails:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout postgres-guardrails plugin
+        uses: actions/checkout@v4
+        with:
+          # TODO: set this to wherever you host the postgres-guardrails
+          # plugin (your own fork is fine) - see docs/ci-setup.md step 1.
+          repository: your-org/postgres-guardrails
+          path: .postgres-guardrails
+
+      - name: Fetch base branch
+        run: git fetch origin "${{ github.event.pull_request.base.ref }}" --depth=1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install "psycopg[binary]" pglast
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run Migration Firewall + plan diff via Claude Code
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BASE_REF: origin/${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha }}
+        run: |
+          claude -p "$(cat .postgres-guardrails/ci/prompt.txt)" \
+            --permission-mode bypassPermissions \
+            --tools "Bash,Read" \
+            --output-format text \
+            > guardrails_output.md
+          echo "----- guardrails output -----"
+          cat guardrails_output.md
+
+      - name: Post PR comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -s guardrails_output.md ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" --body-file guardrails_output.md
+          else
+            echo "::warning::No output to post - the guardrails check may have failed to run."
+          fi
+
+      - name: Evaluate result
+        if: always()
+        run: |
+          if [ ! -s guardrails_output.md ]; then
+            echo "::error::Guardrails check produced no output - treating as failed."
+            exit 1
+          fi
+          if grep -q "POSTGRES_GUARDRAILS_RESULT: BLOCK" guardrails_output.md; then
+            echo "::error::Migration Firewall found a BLOCK-severity issue - see the PR comment."
+            exit 1
+          fi
+          if ! grep -q "POSTGRES_GUARDRAILS_RESULT: PASS" guardrails_output.md; then
+            echo "::warning::No clear PASS/BLOCK marker in the output - review the PR comment manually."
+          fi
+          echo "Guardrails check passed."
