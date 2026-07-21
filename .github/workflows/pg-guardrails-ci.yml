@@ -1,0 +1,15 @@
+name: postgres-guardrails-ci
+
+on:
+  pull_request:
+    paths:
+      - "**/migrations/**"
+
+jobs:
+  check-migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # TODO: install Claude Code, run `claude -p` headless with the
+      # postgres-guardrails plugin to re-check migrations and diff EXPLAIN
+      # plans against a throwaway Postgres instance, then post results to the PR.
