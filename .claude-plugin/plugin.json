@@ -1,0 +1,27 @@
+{
+  "name": "postgres-guardrails",
+  "version": "0.1.0",
+  "description": "Makes it physically impossible for Claude Code to write lock-hazardous PostgreSQL migrations, and gives developers executable tools to diagnose queries and audit Row Level Security.",
+  "author": {
+    "name": "TODO: your name",
+    "email": "TODO: your.email@example.com",
+    "url": "TODO: https://github.com/your-handle"
+  },
+  "homepage": "TODO: https://github.com/your-handle/postgres-guardrails",
+  "repository": "TODO: https://github.com/your-handle/postgres-guardrails",
+  "license": "MIT",
+  "keywords": ["postgresql", "migrations", "database-safety", "rls", "devops"],
+  "commands": [
+    "./commands/pg/check-migration.md",
+    "./commands/pg/doctor.md",
+    "./commands/pg/audit-rls.md",
+    "./commands/pg/upgrade-check.md"
+  ],
+  "agents": [
+    "./agents/rls-auditor.md"
+  ],
+  "skills": [
+    "./skills/query-doctor"
+  ],
+  "hooks": "./hooks/hooks.json"
+}
